@@ -1,7 +1,7 @@
 /**
  * Graph RAG Tools for LangChain Agent
  *
- * Consolidated tools (7 total):
+ * Consolidated tools (8 total):
  * - search: Hybrid search (BM25 + semantic + RRF), grouped by process/cluster
  * - cypher: Execute Cypher queries (auto-embeds {{QUERY_VECTOR}} if present)
  * - grep: Regex pattern search across files
@@ -9,6 +9,7 @@
  * - overview: Codebase map (clusters + processes)
  * - explore: Deep dive on a symbol, cluster, or process
  * - impact: Impact analysis (what depends on / is affected by changes)
+ * - suggest: Read-only diff proposal for a line range (never writes files)
  */
 
 import { tool } from '@langchain/core/tools';
@@ -40,6 +41,7 @@ export const GRAPH_RAG_TOOL_NAMES = [
   'overview',
   'explore',
   'impact',
+  'suggest',
 ] as const;
 
 const validLabel = (label: string): boolean => (NODE_TABLES as readonly string[]).includes(label);
@@ -1649,8 +1651,99 @@ Additional output sections:
   );
 
   // ============================================================================
+  // TOOL 8: SUGGEST (Read-only diff proposal)
+  // ============================================================================
+
+  const suggestTool = tool(
+    async ({
+      filePath,
+      startLine,
+      endLine,
+      replacement,
+      reason,
+    }: {
+      filePath: string;
+      startLine: number;
+      endLine: number;
+      replacement: string;
+      reason: string;
+    }) => {
+      try {
+        // Read-only by design: the diff is returned for the user to review, never applied.
+        const content = await readFile(filePath);
+        // Split on \n only so CRLF lines keep their \r and the hunk matches the file bytes.
+        const lines = content === '' ? [] : content.split('\n');
+        // A trailing newline is a terminator, not an extra empty line.
+        const endsWithNewline = lines.length > 1 && lines[lines.length - 1] === '';
+        if (endsWithNewline) lines.pop();
+        if (startLine < 1 || endLine < startLine || endLine > lines.length) {
+          return `Invalid line range ${startLine}-${endLine}: "${filePath}" has ${lines.length} lines. Use read to check line numbers.`;
+        }
+        const eol = content.includes('\r\n') ? '\r' : '';
+        const removed = lines.slice(startLine - 1, endLine);
+        // A range that reaches an unterminated last line keeps it unterminated.
+        const noEol =
+          endLine === lines.length && !endsWithNewline ? ['\\ No newline at end of file'] : [];
+        const added =
+          replacement === ''
+            ? []
+            : replacement
+                .replace(/\r?\n$/, '')
+                .split(/\r?\n/)
+                .map((l, i, all) => (i === all.length - 1 && noEol.length > 0 ? l : l + eol));
+        // Unified diff convention: an empty range starts at the line before it.
+        const newStart = added.length === 0 ? startLine - 1 : startLine;
+        const diff =
+          [
+            `Suggested change (not applied): ${reason}`,
+            '',
+            `--- a/${filePath}`,
+            `+++ b/${filePath}`,
+            `@@ -${startLine},${removed.length} +${newStart},${added.length} @@`,
+            ...removed.map((l) => `-${l}`),
+            ...noEol,
+            ...added.map((l) => `+${l}`),
+            ...(added.length > 0 ? noEol : []),
+          ].join('\n') + '\n';
+        // Same budget as the read tool, so a huge range cannot flood the context.
+        if (diff.length > 50000) {
+          return `Range ${startLine}-${endLine} of "${filePath}" is too large for one suggestion. Split it into smaller ranges.`;
+        }
+        return diff;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('not found') || message.includes('404')) {
+          return `File not found: "${filePath}". Use grep to search for the correct path.`;
+        }
+        return `Error reading file: ${message}`;
+      }
+    },
+    {
+      name: 'suggest',
+      description:
+        'Propose a code change for a line range as a zero-context diff hunk (applies with git apply --unidiff-zero). Read-only: nothing is written to disk. Use read first to get exact line numbers.',
+      schema: z.object({
+        filePath: z.string().describe('File path to change'),
+        startLine: z.number().int().describe('First line to replace (1-based, inclusive)'),
+        endLine: z.number().int().describe('Last line to replace (1-based, inclusive)'),
+        replacement: z.string().describe('New text for the range (empty string deletes it)'),
+        reason: z.string().describe('One-line explanation of the change'),
+      }),
+    },
+  );
+
+  // ============================================================================
   // RETURN ALL TOOLS
   // ============================================================================
 
-  return [searchTool, cypherTool, grepTool, readTool, overviewTool, exploreTool, impactTool];
+  return [
+    searchTool,
+    cypherTool,
+    grepTool,
+    readTool,
+    overviewTool,
+    exploreTool,
+    impactTool,
+    suggestTool,
+  ];
 };

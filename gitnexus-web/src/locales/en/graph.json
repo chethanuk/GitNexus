@@ -20,7 +20,8 @@
       "read": "📄 Read File",
       "overview": "🗺️ Codebase Overview",
       "explore": "🔬 Deep Dive",
-      "impact": "💥 Impact Analysis"
+      "impact": "💥 Impact Analysis",
+      "suggest": "📝 Suggest Change"
     },
     "query": "Query",
     "input": "Input",
