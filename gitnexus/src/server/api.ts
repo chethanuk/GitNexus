@@ -974,6 +974,59 @@ export function validateAnalyzeToken(
   return null;
 }
 
+const ANALYZE_ROOT_ENV = 'GITNEXUS_ANALYZE_ROOT';
+
+// path.relative stops at separator boundaries (so /root-evil is not under
+// /root) and, on win32, compares case-insensitively like the filesystem does.
+export const isPathWithin = (root: string, target: string, p = path): boolean => {
+  const rel = p.relative(root, target);
+  return rel === '' || (rel !== '..' && !rel.startsWith('..' + p.sep) && !p.isAbsolute(rel));
+};
+
+/**
+ * Confine the local "path" of POST /api/analyze to GITNEXUS_ANALYZE_ROOT when
+ * that is set. Returns an { status, error } to send, { realPath } when the
+ * path is allowed (the caller analyzes that, not the request, which narrows
+ * the window for swapping a symlink after this check), or null when no root
+ * is configured, which keeps the old behaviour.
+ *
+ * The lexical check runs before any realpath of the request path, so a path
+ * outside the root is never touched on disk; realpath then catches symlinks
+ * inside the root that point outside it.
+ */
+export async function checkAnalyzeRoot(
+  localPath: string,
+  field = 'path',
+  rootSetting: string | undefined = process.env[ANALYZE_ROOT_ENV],
+): Promise<{ status: number; error: string } | { realPath: string } | null> {
+  const rootValue = rootSetting?.trim();
+  if (!rootValue) return null;
+  const outside = { status: 403, error: `"${field}" is outside ${ANALYZE_ROOT_ENV}` };
+  if (!path.isAbsolute(rootValue)) {
+    return { status: 500, error: `${ANALYZE_ROOT_ENV} must be an absolute path` };
+  }
+  const root = path.resolve(rootValue);
+  // The root is operator config, so stat it first: a missing root is a 500 for
+  // every request, not a 403 that depends on what the caller sent.
+  let realRoot: string;
+  try {
+    realRoot = await fs.realpath(root);
+  } catch {
+    return { status: 500, error: `${ANALYZE_ROOT_ENV} does not exist` };
+  }
+  const target = path.resolve(localPath);
+  // Either spelling of the root counts, so a canonical path under a symlinked
+  // root (macOS /tmp -> /private/tmp) is not refused.
+  if (!isPathWithin(root, target) && !isPathWithin(realRoot, target)) return outside;
+  let realTarget: string;
+  try {
+    realTarget = await fs.realpath(target);
+  } catch {
+    return { status: 400, error: `"${field}" does not exist` };
+  }
+  return isPathWithin(realRoot, realTarget) ? { realPath: realTarget } : outside;
+}
+
 export const createServer = async (port: number, host: string = '127.0.0.1') => {
   // Refuse a public-origin config before anything is opened or bound: `serve`
   // has no authentication yet, so the setting that makes a public bind usable
@@ -1954,19 +2007,56 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
         // part was cross-origin reach, which is closed by requireTrustedOrigin
         // on this route (scoped to loopback, the server's own bound host, and a
         // configured GITNEXUS_PUBLIC_ORIGIN — other LAN devices are NOT
-        // trusted). We only require an absolute path here and
-        // let the analyze worker surface a clear error if it does not exist.
-        // (We do NOT realpath/stat the path in-route: that would be a
-        // user-controlled filesystem read — CodeQL js/path-injection — for no
-        // security gain.)
+        // trusted). We only require an absolute path here and, unless
+        // GITNEXUS_ANALYZE_ROOT is set, let the analyze worker surface a clear
+        // error if it does not exist.
+        // (We do NOT realpath/stat the path in-route by default: that would be
+        // a user-controlled filesystem read — CodeQL js/path-injection — for no
+        // security gain. checkAnalyzeRoot does so only when GITNEXUS_ANALYZE_ROOT
+        // is set, and only after a lexical check that the path is under it.)
         if (repoLocalPath && !path.isAbsolute(repoLocalPath)) {
           res.status(400).json({ error: '"path" must be an absolute path' });
           return;
         }
+        let analyzePath = repoLocalPath;
+        if (repoLocalPath) {
+          const rootCheck = await checkAnalyzeRoot(repoLocalPath);
+          if (rootCheck && 'error' in rootCheck) {
+            res.status(rootCheck.status).json({ error: rootCheck.error });
+            return;
+          }
+          if (rootCheck && 'realPath' in rootCheck) analyzePath = rootCheck.realPath;
+        }
+        // The spec inputs are files the analyzer reads too, resolved against the
+        // repo, so they get the same check from there. A repo cloned from "url"
+        // does not exist yet and its contents (symlinks included) are the
+        // caller's, so spec inputs are refused there rather than half-checked.
+        // Like "path", the checked realpath is what the worker reads.
+        const checkedSpec: Record<string, string | undefined> = {
+          springActuatorPath,
+          asyncApiSpecPath,
+        };
+        for (const [field, specPath] of [
+          ['springActuatorPath', springActuatorPath],
+          ['asyncApiSpecPath', asyncApiSpecPath],
+        ] as const) {
+          if (specPath === undefined || !process.env[ANALYZE_ROOT_ENV]?.trim()) continue;
+          const rootError = analyzePath
+            ? await checkAnalyzeRoot(path.resolve(analyzePath, specPath), field)
+            : {
+                status: 403,
+                error: `"${field}" needs a local "path" when ${ANALYZE_ROOT_ENV} is set`,
+              };
+          if (rootError && 'error' in rootError) {
+            res.status(rootError.status).json({ error: rootError.error });
+            return;
+          }
+          if (rootError && 'realPath' in rootError) checkedSpec[field] = rootError.realPath;
+        }
 
         const job = jobManager.createJob({
           repoUrl,
-          repoPath: repoLocalPath,
+          repoPath: analyzePath,
           branch: analyzeBranch,
         });
 
@@ -1991,7 +2081,7 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
 
         // Start async work — don't await
         (async () => {
-          let targetPath = repoLocalPath;
+          let targetPath = analyzePath;
           try {
             // Clone if URL provided
             if (repoUrl && !repoLocalPath) {
@@ -2034,8 +2124,8 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
               force,
               embeddings,
               dropEmbeddings,
-              springActuatorPath,
-              asyncApiSpecPath,
+              springActuatorPath: checkedSpec.springActuatorPath,
+              asyncApiSpecPath: checkedSpec.asyncApiSpecPath,
               branch: analyzeBranch,
               // Both clone dirs share an `origin`, so the name `registerRepo`
               // infers from the remote would be identical and the second one
