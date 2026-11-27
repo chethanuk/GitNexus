@@ -122,29 +122,29 @@ TypeEnv extraction support alone does not prove reference resolution.
 
 ### Type Inference
 
-| Gap                                   | Description                                          | Impact                          |
-| ------------------------------------- | ---------------------------------------------------- | ------------------------------- |
-| `switch` / `case` pattern binding     | `case let x as Foo:` not tracked                     | Enum pattern matching           |
-| Tuple destructuring                   | `let (a, b) = fn()` not handled                      | Uncommon pattern                |
-| `@Environment` / `@EnvironmentObject` | SwiftUI dependency injection — no AST representation | Would need heuristic resolution |
-| `@Query` (SwiftData)                  | Property wrapper types not inferrable from AST       | SwiftData-specific              |
-| `#if canImport(...)`                  | Conditional compilation not evaluated                | Cross-platform projects         |
+| Gap                               | Description                                                                               | Impact                       |
+| --------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------- |
+| `switch` / `case` pattern binding | `case let x as Foo:` not tracked                                                          | Enum pattern matching        |
+| Tuple destructuring               | `let (a, b) = fn()` not handled                                                           | Uncommon pattern             |
+| `@EnvironmentObject`              | `@EnvironmentObject var vm: VM` gets no USES edge, like other annotated stored properties | SwiftUI dependency injection |
+| `#if canImport(...)`              | Conditional compilation not evaluated                                                     | Cross-platform projects      |
 
 ## ✅ Historical extraction fixes
 
 These entries record earlier fixes. They are not proof that every corresponding
 receiver or cross-file form is covered by the current pipeline.
 
-| Gap                               | Resolution                                                                                               | Commit    |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------- | --------- |
-| Cross-chunk implicit imports      | `addSwiftImplicitImports` now uses `allFileList` instead of chunk-only `files`                           | `956dfd0` |
-| `private(set)` false positive     | Regex excludes `private(set)` / `fileprivate(set)` from unexported check                                 | `0a3cdce` |
-| `if let` / `guard let` binding    | `extractIfGuardBinding` handles optional bindings                                                        | `16b1a63` |
-| `await` / `try` unwrapping        | `unwrapSwiftExpression` strips wrappers before RHS analysis                                              | `16b1a63` |
-| For-loop element type extraction  | `extractForLoopBinding` + `extractSwiftElementTypeFromTypeNode` + type_annotation population in type-env | `956dfd0` |
-| `self` / `super` resolution       | `lookupInEnv` handles `self`/`super` via AST walk                                                        | `16b1a63` |
-| Optional chaining `obj?.method()` | Handled via `optional_chaining_expression`                                                               | `16b1a63` |
-| Initial inheritance capture       | First-specifier capture was added; this does not establish complete protocol-list coverage               | `16b1a63` |
+| Gap                                          | Resolution                                                                                                                                                     | Commit    |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| Cross-chunk implicit imports                 | `addSwiftImplicitImports` now uses `allFileList` instead of chunk-only `files`                                                                                 | `956dfd0` |
+| `private(set)` false positive                | Regex excludes `private(set)` / `fileprivate(set)` from unexported check                                                                                       | `0a3cdce` |
+| `if let` / `guard let` binding               | `extractIfGuardBinding` handles optional bindings                                                                                                              | `16b1a63` |
+| `await` / `try` unwrapping                   | `unwrapSwiftExpression` strips wrappers before RHS analysis                                                                                                    | `16b1a63` |
+| For-loop element type extraction             | `extractForLoopBinding` + `extractSwiftElementTypeFromTypeNode` + type_annotation population in type-env                                                       | `956dfd0` |
+| `self` / `super` resolution                  | `lookupInEnv` handles `self`/`super` via AST walk                                                                                                              | `16b1a63` |
+| Optional chaining `obj?.method()`            | Handled via `optional_chaining_expression`                                                                                                                     | `16b1a63` |
+| Initial inheritance capture                  | First-specifier capture was added; this does not establish complete protocol-list coverage                                                                     | `16b1a63` |
+| `@Environment(T.self)` / `@Query var x: [T]` | `synthesizeSwiftPropertyWrapperTypeReferences` emits USES to `T`, including qualified names, `[T]?` and `Array<T>`; key-path `@Environment(\.x)` emits nothing | n/a       |
 
 Evidence details: [receiver baseline notes](../../gitnexus/bench/receiver-resolution/BASELINE.md) and
 [current roadmap](../../type-resolution-roadmap.md#current-backlog).
