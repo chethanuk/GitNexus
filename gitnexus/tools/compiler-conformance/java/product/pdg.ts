@@ -54,7 +54,7 @@ it('default and disabled Java PDG match the recorded graph', { timeout: 90_000 }
   const expected = {
     byRelType: { CALLS: 10, DEFINES: 1, HAS_METHOD: 21, MEMBER_OF: 14 },
     byType: { Class: 1, Community: 4, File: 1, Method: 21 },
-    edgeDigest: 'ef3ac1fffdde8dadd7c261938588ff86e9d0068572fb52e8b1ff771534ae762e',
+    edgeDigest: 'f98d7b81cacd88538f00cc817467fdc5254e0a375ae4adf205ab92ee7a76edac',
     relationships: 46,
     symbols: 27,
   };

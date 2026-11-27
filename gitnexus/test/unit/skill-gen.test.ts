@@ -444,6 +444,36 @@ describe('generateSkillFiles — return values', () => {
     expect(result.skills[0].label).toBe('Auth');
   });
 
+  it.each([
+    [
+      'nearest non-generic ancestor',
+      ['src/auth/utils/a.ts', 'src/auth/utils/b.ts', 'src/pay/c.ts'],
+      'Auth',
+    ],
+    [
+      'file stem when every folder is generic',
+      ['src/core/parser.ts', 'src/core/parser.ts', 'lib/x.ts'],
+      'Parser',
+    ],
+  ])(
+    'labels fallback communities like the community processor: %s',
+    async (_case, filePaths, expected) => {
+      const graph = createKnowledgeGraph();
+      filePaths.forEach((filePath, i) => {
+        graph.addNode(makeNode(`fn:n${i}`, `func${i}`, 'Function', filePath, 1, true));
+      });
+      const memberships = filePaths.map((_, i) => makeMembership(`fn:n${i}`, 'comm_0'));
+
+      const result = await generateSkillFiles(
+        tmpDir,
+        'TestProject',
+        buildPipelineResult({ graph, repoPath: tmpDir, communities: [], memberships }),
+      );
+
+      expect(result.skills.map((skill) => skill.label)).toEqual([expected]);
+    },
+  );
+
   it('generates a folder skill from real singleton assignments without dangling membership edges', async () => {
     const graph = createKnowledgeGraph();
     graph.addNode(makeNode('file:target', 'target', 'File', `${tmpDir}/target.ts`, 1, false));

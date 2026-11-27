@@ -20,7 +20,7 @@ exports[`U7 — C-family worker-mode --pdg pipeline > C#: --pdg off is byte-iden
     "Process": 1,
     "Property": 2,
   },
-  "edgeDigest": "c08d64f8fb2fed7e329f7f0bf050876a5f896ee5c4b1ee895c5328a859b7785e",
+  "edgeDigest": "8fc909db915111f4473787a18ee4189f941f0a357512e55cbeaf8cffc432552b",
   "relationships": 39,
   "symbols": 26,
 }
@@ -38,7 +38,7 @@ exports[`U7 — C-family worker-mode --pdg pipeline > C++: --pdg off is byte-ide
     "File": 1,
     "Function": 7,
   },
-  "edgeDigest": "82ea22d85c2fdeb9160c50e1df90e0dd039bc899763a0a6c63975e0d6f0c7873",
+  "edgeDigest": "cb5391f47b2ef4324ad72ddeb5f081d83cccd873e952af47de2bc4db75718b07",
   "relationships": 10,
   "symbols": 9,
 }
@@ -71,7 +71,7 @@ exports[`U7 — C-family worker-mode --pdg pipeline > Go: --pdg off is byte-iden
     "File": 1,
     "Function": 28,
   },
-  "edgeDigest": "f9ee30ae95a50259cf4a675ee0b9e5fe248df1a3ff3d6193bde14a4ae4db1e35",
+  "edgeDigest": "052ab34efacd588ed95bd5528f3ae38ee2555e24e988afc0e55a25853340b627",
   "relationships": 64,
   "symbols": 37,
 }

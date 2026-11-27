@@ -852,50 +852,65 @@ const createCommunityNodes = (
 // HELPER: Generate heuristic label from folder patterns
 // ============================================================================
 
+const GENERIC_FOLDERS = new Set(['src', 'lib', 'core', 'utils', 'common', 'shared', 'helpers']);
+
+/** Most frequent key; count ties go to the smaller key so labels do not depend on member order. */
+const mostCommon = (counts: Map<string, number>): string => {
+  let best = '';
+  let bestCount = 0;
+  counts.forEach((count, key) => {
+    if (count > bestCount || (count === bestCount && key < best)) {
+      best = key;
+      bestCount = count;
+    }
+  });
+  return best;
+};
+
 /**
- * Generate a human-readable label from the most common folder name in the community
+ * Label from member file paths: the most common nearest non-generic folder,
+ * else the most common file stem. Empty string when neither exists.
+ */
+export const labelFromFilePaths = (filePaths: string[]): string => {
+  const folderCounts = new Map<string, number>();
+  const stemCounts = new Map<string, number>();
+
+  filePaths.forEach((filePath) => {
+    const parts = filePath.replace(/\\/g, '/').split('/').filter(Boolean);
+    if (parts.length === 0) return;
+
+    // Walk up from the parent directory to the nearest non-generic folder
+    for (let i = parts.length - 2; i >= 0; i--) {
+      if (!GENERIC_FOLDERS.has(parts[i].toLowerCase())) {
+        folderCounts.set(parts[i], (folderCounts.get(parts[i]) || 0) + 1);
+        break;
+      }
+    }
+
+    const stem = parts[parts.length - 1].split('.')[0];
+    if (stem && stem.toLowerCase() !== 'index') {
+      stemCounts.set(stem, (stemCounts.get(stem) || 0) + 1);
+    }
+  });
+
+  const best = mostCommon(folderCounts) || mostCommon(stemCounts);
+  // Capitalize first letter
+  return best ? best.charAt(0).toUpperCase() + best.slice(1) : '';
+};
+
+/**
+ * Generate a human-readable label for a community from its members' file
+ * paths, else their common name prefix, else a stable Cluster_ id.
  */
 const generateHeuristicLabel = (
   memberIds: string[],
   graph: GraphInstance,
   communityId: string,
 ): string => {
-  // Collect folder names from file paths
-  const folderCounts = new Map<string, number>();
-
-  memberIds.forEach((nodeId) => {
-    const filePath: string = graph.getNodeAttribute(nodeId, 'filePath') || '';
-    const parts = filePath.split('/').filter(Boolean);
-
-    // Get the most specific folder (parent directory)
-    if (parts.length >= 2) {
-      const folder = parts[parts.length - 2];
-      // Skip generic folder names
-      if (
-        !['src', 'lib', 'core', 'utils', 'common', 'shared', 'helpers'].includes(
-          folder.toLowerCase(),
-        )
-      ) {
-        folderCounts.set(folder, (folderCounts.get(folder) || 0) + 1);
-      }
-    }
-  });
-
-  // Find most common folder
-  let maxCount = 0;
-  let bestFolder = '';
-
-  folderCounts.forEach((count, folder) => {
-    if (count > maxCount) {
-      maxCount = count;
-      bestFolder = folder;
-    }
-  });
-
-  if (bestFolder) {
-    // Capitalize first letter
-    return bestFolder.charAt(0).toUpperCase() + bestFolder.slice(1);
-  }
+  const pathLabel = labelFromFilePaths(
+    memberIds.map((nodeId) => graph.getNodeAttribute(nodeId, 'filePath') || ''),
+  );
+  if (pathLabel) return pathLabel;
 
   // Fallback: use function names to detect patterns
   const names: string[] = [];

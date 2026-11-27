@@ -111,6 +111,8 @@ describe('pipeline end-to-end', () => {
       if (n.label === 'Community') communityNodes.push(n.properties.name);
     });
     expect(communityNodes.length).toBeGreaterThan(0);
+    // mini-repo keeps every file directly under src/, so labels must come from file stems.
+    expect(communityNodes.filter((name) => name.startsWith('Cluster_'))).toEqual([]);
 
     // MEMBER_OF relationships should exist
     let memberOfCount = 0;
