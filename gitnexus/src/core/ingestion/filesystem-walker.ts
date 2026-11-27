@@ -9,6 +9,7 @@ import {
 } from './utils/include-dot-dirs.js';
 import fs from 'fs/promises';
 import { readdir } from 'node:fs';
+import { isUtf8 } from 'node:buffer';
 import path from 'path';
 import { glob, globIterate } from 'glob';
 import { createIgnoreFilter } from '../../config/ignore-service.js';
@@ -281,6 +282,60 @@ export const countScanCandidates = async (
   return count;
 };
 
+// The UTF-8 encoding of U+FFFD, so literal replacement characters are not counted as errors.
+const ENCODED_REPLACEMENT = Buffer.from([0xef, 0xbf, 0xbd]);
+// Null when the runtime lacks full ICU, so a missing decoder only disables the fallback.
+const strictShiftJis = (() => {
+  try {
+    return new TextDecoder('shift_jis', { fatal: true });
+  } catch {
+    return null;
+  }
+})();
+
+/**
+ * Decode source bytes as UTF-8. Bytes that are not valid UTF-8 are tried as
+ * Shift-JIS (common in legacy source files) only when most of their non-ASCII
+ * content is invalid UTF-8, so a UTF-8 file with one stray byte keeps its text.
+ * Otherwise, or if Shift-JIS also fails, we fall back to the previous lossy
+ * UTF-8 decode.
+ *
+ * shortcut: a file in another legacy single-byte encoding (for example cp1252)
+ * whose bytes also form valid Shift-JIS pairs decodes as Shift-JIS rather than
+ * as U+FFFD; add real encoding detection if that shows up in practice.
+ */
+const decodeFileBytes = (bytes: Buffer): string => {
+  // Buffer#toString keeps a leading BOM, matching the previous readFile(..., 'utf-8') output.
+  const lossy = bytes.toString('utf-8');
+  if (isUtf8(bytes) || !strictShiftJis) return lossy;
+  let literal = 0;
+  for (
+    let i = bytes.indexOf(ENCODED_REPLACEMENT);
+    i !== -1;
+    i = bytes.indexOf(ENCODED_REPLACEMENT, i + 3)
+  ) {
+    literal++;
+  }
+  let invalid = -literal;
+  let nonAscii = 0;
+  for (let i = 0; i < lossy.length; i++) {
+    const code = lossy.charCodeAt(i);
+    if (code > 0x7f) {
+      nonAscii++;
+      if (code === 0xfffd) invalid++;
+    }
+  }
+  const validNonAscii = nonAscii - invalid;
+  if (invalid > validNonAscii) {
+    try {
+      return strictShiftJis.decode(bytes);
+    } catch {
+      // Not Shift-JIS either.
+    }
+  }
+  return lossy;
+};
+
 /**
  * Phase 2: Read file contents for a specific set of relative paths.
  * Returns a Map for O(1) lookup. Silently skips files that fail to read.
@@ -295,7 +350,7 @@ export const readFileContents = async (
     relativePaths,
     async (relativePath) => {
       const fullPath = path.join(repoPath, relativePath);
-      const content = await fs.readFile(fullPath, 'utf-8');
+      const content = decodeFileBytes(await fs.readFile(fullPath));
       return { path: relativePath, content };
     },
     { concurrency: READ_CONCURRENCY },

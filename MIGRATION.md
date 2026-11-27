@@ -1,5 +1,9 @@
 # Migration Guide
 
+## Shift-JIS source decoding
+
+Analysis now decodes source files that are not valid UTF-8 as Shift-JIS when most of their non-ASCII bytes are invalid UTF-8 and the whole file is valid Shift-JIS. Symbol names, file content and search text from such files now show the original Japanese text instead of U+FFFD replacement characters. Valid UTF-8 files are unchanged. Existing indexes keep the old text until the next `gitnexus analyze --force` for that repository. A file in another legacy single-byte encoding, such as cp1252, can now decode as Shift-JIS when its bytes happen to form valid Shift-JIS pairs.
+
 ## Upstream impact risk (#3972)
 
 Upstream `impact` now rates the number of direct dependants. On a complete, nonempty walk, 5 direct dependants trigger MEDIUM, 15 trigger HIGH and 200 trigger CRITICAL. Process membership, module membership and indirect reach remain available in the summary. An edit gate based on HIGH or CRITICAL can therefore fire less often for a symbol with few direct callers on many flows. Downstream thresholds are unchanged.
