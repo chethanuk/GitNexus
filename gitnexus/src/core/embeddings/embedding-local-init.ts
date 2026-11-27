@@ -48,6 +48,39 @@ const formatDeviceLabel = (device: EmbeddingSidecarDevice): string => {
   }
 };
 
+// DirectML can load and still return vectors unrelated to CPU's for the same
+// text, so an explicit dml request must match CPU on a probe before it is used.
+const DML_PARITY_PROBE = 'function add(a, b) { return a + b; }';
+const DML_PARITY_MIN_COSINE = 0.99;
+
+const embedProbe = async (p: FeatureExtractionPipeline): Promise<number[]> =>
+  Array.from(
+    (await p([DML_PARITY_PROBE], { pooling: 'mean', normalize: true })).data as ArrayLike<number>,
+  );
+
+// Full cosine rather than a bare dot product: a broken backend may not return
+// unit vectors even when asked to normalize.
+const cosine = (a: number[], b: number[]): number => {
+  if (a.length !== b.length) return Number.NaN;
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return dot / Math.sqrt(na * nb);
+};
+
+const disposeQuietly = async (p: FeatureExtractionPipeline): Promise<void> => {
+  try {
+    await p.dispose();
+  } catch {
+    // Best effort: a failed dispose must not change which device is used.
+  }
+};
+
 export const getCurrentDevice = (): EmbeddingSidecarDevice | null => currentDevice;
 
 export const initLocalEmbedder = async (
@@ -69,11 +102,8 @@ export const initLocalEmbedder = async (
   }
 
   const finalConfig = resolveEmbeddingConfig(config);
-  const gpuDevice: EmbeddingSidecarDevice = isEffectiveCudaAvailable()
-    ? 'cuda'
-    : process.platform === 'win32'
-      ? 'dml'
-      : 'cpu';
+  // DirectML is never auto-selected: it can return wrong vectors without failing.
+  const gpuDevice: EmbeddingSidecarDevice = isEffectiveCudaAvailable() ? 'cuda' : 'cpu';
   const requestedDevice =
     forceDevice || (finalConfig.device === 'auto' ? gpuDevice : finalConfig.device);
 
@@ -129,34 +159,72 @@ export const initLocalEmbedder = async (
             logger.info('🔧 Using WASM backend (slower)...');
           }
 
-          embedderInstance = await withHfDownloadRetry(
-            () =>
-              pipeline('feature-extraction', finalConfig.modelId, {
-                device: device,
-                dtype: 'fp32',
-                progress_callback: progressCallback,
-                session_options: {
-                  logSeverityLevel: 3,
-                  intraOpNumThreads: finalConfig.threads,
-                  interOpNumThreads: 1,
-                  executionMode: 'sequential',
-                },
-              }),
-            {
-              onRetry: isDev
-                ? (attempt, max, err) =>
-                    logger.warn(
-                      { attempt, max, err: err.message },
-                      `⚠️  Model download network error (attempt ${attempt}/${max}), retrying…`,
-                    )
-                : undefined,
-            },
-          );
-          currentDevice = device;
+          const loadPipeline = (target: EmbeddingSidecarDevice) =>
+            withHfDownloadRetry(
+              () =>
+                pipeline('feature-extraction', finalConfig.modelId, {
+                  device: target,
+                  dtype: 'fp32',
+                  progress_callback: progressCallback,
+                  session_options: {
+                    logSeverityLevel: 3,
+                    intraOpNumThreads: finalConfig.threads,
+                    interOpNumThreads: 1,
+                    executionMode: 'sequential',
+                  },
+                }),
+              {
+                onRetry: isDev
+                  ? (attempt, max, err) =>
+                      logger.warn(
+                        { attempt, max, err: err.message },
+                        `⚠️  Model download network error (attempt ${attempt}/${max}), retrying…`,
+                      )
+                  : undefined,
+              },
+            );
+          let loaded = await loadPipeline(device);
+          let selectedDevice = device;
+          if (device === 'dml') {
+            const dmlEmbedder = loaded;
+            let cpuEmbedder: FeatureExtractionPipeline | undefined;
+            let cpuProbe: number[];
+            try {
+              cpuEmbedder = await loadPipeline('cpu');
+              cpuProbe = await embedProbe(cpuEmbedder);
+            } catch (err) {
+              await disposeQuietly(dmlEmbedder);
+              if (cpuEmbedder) await disposeQuietly(cpuEmbedder);
+              throw err;
+            }
+            // A DirectML probe that throws or yields NaN counts as a mismatch.
+            let probeError: string | undefined;
+            const similarity = await embedProbe(dmlEmbedder).then(
+              (dmlProbe) => cosine(dmlProbe, cpuProbe),
+              (err: unknown) => {
+                probeError = err instanceof Error ? err.message : String(err);
+                return Number.NaN;
+              },
+            );
+            if (!(similarity >= DML_PARITY_MIN_COSINE)) {
+              logger.warn(
+                probeError !== undefined
+                  ? `DirectML probe failed (${probeError}); using CPU instead.`
+                  : `DirectML embeddings do not match CPU (probe cosine ${similarity.toFixed(3)}); using CPU instead.`,
+              );
+              loaded = cpuEmbedder;
+              selectedDevice = 'cpu';
+              await disposeQuietly(dmlEmbedder);
+            } else {
+              await disposeQuietly(cpuEmbedder);
+            }
+          }
+          embedderInstance = loaded;
+          currentDevice = selectedDevice;
           activeDimensions = finalConfig.dimensions;
 
           if (isDev) {
-            logger.info(`✅ Using ${formatDeviceLabel(device)} backend`);
+            logger.info(`✅ Using ${formatDeviceLabel(selectedDevice)} backend`);
             logger.info('✅ Embedding model loaded successfully');
           }
 

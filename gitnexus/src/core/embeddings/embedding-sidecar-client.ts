@@ -406,7 +406,10 @@ const spawnAndInit = async (options?: EnsureSidecarOptions): Promise<void> => {
 };
 
 const rejectConflictingForceDevice = (forceDevice?: EmbeddingSidecarDevice): void => {
-  if (forceDevice && forceDevice !== device) {
+  // A sidecar initialized for this device may have fallen back to CPU (GPU load
+  // failure or DirectML parity mismatch); that answer stands.
+  const initDevice = lastInitOptions?.forceDevice ?? lastInitOptions?.embeddingConfig.device;
+  if (forceDevice && forceDevice !== device && forceDevice !== initDevice) {
     throw new Error(
       `Embedding sidecar already initialized on ${device}; cannot switch to ${forceDevice}`,
     );

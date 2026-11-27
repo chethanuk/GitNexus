@@ -57,6 +57,7 @@ describe('embedding sidecar client', () => {
   const originalHfTimeout = process.env.HF_DOWNLOAD_TIMEOUT_MS;
   const originalHfAttempts = process.env.HF_MAX_ATTEMPTS;
   const originalSidecarTimeout = process.env.GITNEXUS_EMBEDDING_SIDECAR_TIMEOUT_MS;
+  const originalDevice = process.env.GITNEXUS_EMBEDDING_DEVICE;
   const hostPlatform = process.platform;
   const hostArch = process.arch;
 
@@ -65,6 +66,8 @@ describe('embedding sidecar client', () => {
 
   beforeEach(async () => {
     delete process.env.GITNEXUS_EMBEDDING_URL;
+    // The env device overrides embeddingConfig.device, so a host value would skew device cases.
+    delete process.env.GITNEXUS_EMBEDDING_DEVICE;
     // Local-success cases must not inherit a darwin/x64 host blocker.
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     Object.defineProperty(process, 'arch', { value: 'x64', configurable: true });
@@ -85,6 +88,8 @@ describe('embedding sidecar client', () => {
     client._setForkForTests(null);
     if (originalUrl === undefined) delete process.env.GITNEXUS_EMBEDDING_URL;
     else process.env.GITNEXUS_EMBEDDING_URL = originalUrl;
+    if (originalDevice === undefined) delete process.env.GITNEXUS_EMBEDDING_DEVICE;
+    else process.env.GITNEXUS_EMBEDDING_DEVICE = originalDevice;
     if (originalModel === undefined) delete process.env.GITNEXUS_EMBEDDING_MODEL;
     else process.env.GITNEXUS_EMBEDDING_MODEL = originalModel;
     if (originalHfTimeout === undefined) delete process.env.HF_DOWNLOAD_TIMEOUT_MS;
@@ -133,6 +138,39 @@ describe('embedding sidecar client', () => {
     await expect(ensureEmbeddingSidecar({ forceDevice: 'cpu' })).resolves.toEqual({
       device: 'cpu',
     });
+  });
+
+  it('accepts a forced GPU device that the sidecar fell back to CPU for', async () => {
+    const { ensureEmbeddingSidecar } =
+      await import('../../src/core/embeddings/embedding-sidecar-client.js');
+    // The fake sidecar answers every init with cpu, like a dml probe mismatch.
+    await expect(ensureEmbeddingSidecar({ forceDevice: 'dml' })).resolves.toEqual({
+      device: 'cpu',
+    });
+    await expect(ensureEmbeddingSidecar({ forceDevice: 'dml' })).resolves.toEqual({
+      device: 'cpu',
+    });
+    await expect(ensureEmbeddingSidecar({ forceDevice: 'cpu' })).resolves.toEqual({
+      device: 'cpu',
+    });
+    await expect(ensureEmbeddingSidecar({ forceDevice: 'cuda' })).rejects.toThrow(
+      'Embedding sidecar already initialized on cpu; cannot switch to cuda',
+    );
+    expect(forkMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a forced device matching a configured device that fell back to CPU', async () => {
+    const { ensureEmbeddingSidecar } =
+      await import('../../src/core/embeddings/embedding-sidecar-client.js');
+    await expect(ensureEmbeddingSidecar({ embeddingConfig: { device: 'dml' } })).resolves.toEqual({
+      device: 'cpu',
+    });
+    await expect(ensureEmbeddingSidecar({ forceDevice: 'dml' })).resolves.toEqual({
+      device: 'cpu',
+    });
+    await expect(ensureEmbeddingSidecar({ forceDevice: 'cuda' })).rejects.toThrow(
+      'Embedding sidecar already initialized on cpu; cannot switch to cuda',
+    );
   });
 
   it('forks once for two batches', async () => {

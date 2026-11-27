@@ -234,7 +234,11 @@ export interface EmbeddingConfig {
   threads: number;
   /** Embedding vector dimensions */
   dimensions: number;
-  /** Device to use for inference: 'auto' tries GPU first (DirectML on Windows, CUDA on Linux), falls back to CPU */
+  /**
+   * Device to use for inference: 'auto' uses CUDA when available, else CPU. DirectML is
+   * never auto-selected; 'dml' falls back to CPU if it fails to load or disagrees with CPU
+   * on a probe embedding.
+   */
   device: 'auto' | 'dml' | 'cuda' | 'cpu' | 'wasm';
   /** Maximum characters of code snippet to include */
   maxSnippetLength: number;
