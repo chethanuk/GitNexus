@@ -1085,7 +1085,7 @@ const formatUnparsedFilesNote = (filePaths: readonly string[]): string | undefin
   const total = fileCount(ranked);
   const shown = ranked.slice(0, 5).map(([key, count]) => `${key} (${count})`);
   if (ranked.length > 5) shown.push(`+${fileCount(ranked.slice(5))} more file(s)`);
-  return `Note: ${total} file(s) have no language parser, so no symbols were extracted: ${shown.join(', ')}`;
+  return `Note: ${total} file(s) have no language parser: ${shown.join(', ')}`;
 };
 
 export const analyzeCommand = async (

@@ -17,8 +17,7 @@ describe('analyze summary names files without a language parser', () => {
         'scripts/deploy.sh': '#!/bin/sh\ndeploy() { echo ok; }\n',
         'config.json': '{}\n',
       },
-      expected:
-        'Note: 3 file(s) have no language parser, so no symbols were extracted: .sh (2), .json (1)',
+      expected: 'Note: 3 file(s) have no language parser: .sh (2), .json (1)',
     },
     {
       name: 'more extensions than the summary lists',
@@ -33,7 +32,7 @@ describe('analyze summary names files without a language parser', () => {
         Makefile: 'all:\n\ttrue\n',
       },
       expected:
-        'Note: 7 file(s) have no language parser, so no symbols were extracted: .sh (2), .ini (1), .toml (1), .txt (1), .yml (1), +1 more file(s)',
+        'Note: 7 file(s) have no language parser: .sh (2), .ini (1), .toml (1), .txt (1), .yml (1), +1 more file(s)',
     },
     {
       name: 'exactly five extensions, mixed case, with a template',
@@ -47,7 +46,7 @@ describe('analyze summary names files without a language parser', () => {
         Makefile: 'all:\n\ttrue\n',
       },
       expected:
-        'Note: 5 file(s) have no language parser, so no symbols were extracted: .ini (1), .sh (1), .toml (1), .yml (1), Makefile (1)',
+        'Note: 5 file(s) have no language parser: .ini (1), .sh (1), .toml (1), .yml (1), Makefile (1)',
     },
     {
       name: 'inputs handled outside tree-sitter',
@@ -59,8 +58,7 @@ describe('analyze summary names files without a language parser', () => {
         'src/main/resources/other.yml': 'a: 1\n',
         'run.sh': 'true\n',
       },
-      expected:
-        'Note: 2 file(s) have no language parser, so no symbols were extracted: .sh (1), .yml (1)',
+      expected: 'Note: 2 file(s) have no language parser: .sh (1), .yml (1)',
     },
     {
       name: 'GitNexus-managed dot directory left out',
@@ -70,7 +68,7 @@ describe('analyze summary names files without a language parser', () => {
         'run.sh': 'true\n',
       },
       env: { GITNEXUS_INCLUDE_DOT_DIRS: '.claude' },
-      expected: 'Note: 1 file(s) have no language parser, so no symbols were extracted: .sh (1)',
+      expected: 'Note: 1 file(s) have no language parser: .sh (1)',
     },
     {
       name: 'only parsed code and markdown',
