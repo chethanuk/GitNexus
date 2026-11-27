@@ -471,6 +471,7 @@ export function emitSwiftScopeCaptures(
   // legacy heritage-capture leg (removed in #942), which the worker pipeline
   // drops for registry-primary languages (issue #1951).
   out.push(...synthesizeSwiftInheritanceReferences(tree.rootNode));
+  out.push(...synthesizeSwiftPropertyWrapperTypeReferences(tree.rootNode));
   out.push(...synthesizeCallableFlowCaptures(tree.rootNode, SWIFT_CALLABLE_CAPTURE_OPTIONS));
 
   return out;
@@ -510,6 +511,73 @@ function synthesizeSwiftInheritanceReferences(root: SyntaxNode): CaptureMatch[] 
         '@reference.inherits': nodeToCapture('@reference.inherits', child),
         '@reference.name': nodeToCapture('@reference.name', nameNode),
       });
+    }
+  });
+  return out;
+}
+
+/**
+ * Synthesize `@reference.type` captures (USES edges) for the two SwiftUI /
+ * SwiftData property wrappers that name a model type outside the property's
+ * own type annotation:
+ *   `@Environment(Svc.self) var svc`      → Svc (the property has no type)
+ *   `@Query var products: [Product]`      → Product (array element type)
+ * Qualified forms (`Models.Svc.self`, `[Models.Product]`, `@SwiftUI.Environment`),
+ * `[T]?` and `Array<T>` resolve to the same bare name. Key-path environment
+ * values (`@Environment(\.colorScheme)`) name no type and emit nothing.
+ * shortcut: wrappers are matched by name, so a user-defined `@Query` /
+ * `@Environment` behaves the same; an un-annotated `@Query(FetchDescriptor<T>())`
+ * is not handled. Upgrade if either shows up in real projects.
+ */
+function synthesizeSwiftPropertyWrapperTypeReferences(root: SyntaxNode): CaptureMatch[] {
+  const out: CaptureMatch[] = [];
+  const push = (nameNode: SyntaxNode) =>
+    out.push({
+      '@reference.type': nodeToCapture('@reference.type', nameNode),
+      '@reference.name': nodeToCapture('@reference.name', nameNode),
+    });
+  walkNamedTree(root, (node) => {
+    if (node.type !== 'property_declaration') return;
+    const modifiers = node.namedChildren.find((c) => c?.type === 'modifiers');
+    if (modifiers === undefined || modifiers === null) return;
+    for (const attr of modifiers.namedChildren) {
+      if (attr === null || attr.type !== 'attribute') continue;
+      const wrapper = attr.firstNamedChild;
+      if (wrapper === null || wrapper.type !== 'user_type') continue;
+      const wrapperName = swiftQualifiedBaseTail(wrapper)?.text;
+      if (wrapperName === 'Environment') {
+        // `Svc.self` parses as navigation_expression(target: simple_identifier, suffix: self);
+        // `Models.Svc.self` nests the target one level, so its own suffix is the type name.
+        for (const arg of attr.namedChildren) {
+          if (arg?.type !== 'navigation_expression') continue;
+          if (arg.childForFieldName('suffix')?.childForFieldName('suffix')?.text !== 'self')
+            continue;
+          const target = arg.childForFieldName('target');
+          const typeName =
+            target?.type === 'navigation_expression'
+              ? target.childForFieldName('suffix')?.childForFieldName('suffix')
+              : target;
+          if (typeName?.type === 'simple_identifier') push(typeName);
+        }
+      } else if (wrapperName === 'Query') {
+        let collection = node.namedChildren
+          .find((c) => c?.type === 'type_annotation')
+          ?.childForFieldName('name');
+        if (collection?.type === 'optional_type')
+          collection = collection.childForFieldName('wrapped');
+        // `[T]` (array_type) or `Array<T>` (user_type with type_arguments).
+        let element: SyntaxNode | null | undefined;
+        if (collection?.type === 'array_type') element = collection.childForFieldName('name');
+        else if (
+          collection?.type === 'user_type' &&
+          swiftQualifiedBaseTail(collection)?.text === 'Array'
+        )
+          element = collection.namedChildren.find(
+            (c) => c?.type === 'type_arguments',
+          )?.firstNamedChild;
+        const nameNode = element == null ? null : swiftBaseTypeIdentifier(element);
+        if (nameNode !== null) push(nameNode);
+      }
     }
   });
   return out;
