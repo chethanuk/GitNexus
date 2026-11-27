@@ -10,7 +10,11 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { PipelineResult } from '../types/pipeline.js';
-import { CommunityNode, CommunityMembership } from '../core/ingestion/community-processor.js';
+import {
+  CommunityNode,
+  CommunityMembership,
+  labelFromFilePaths,
+} from '../core/ingestion/community-processor.js';
 import { ProcessNode } from '../core/ingestion/process-processor.js';
 import { KnowledgeGraph } from '../core/graph/types.js';
 import { shouldMirrorSkillsToAgents } from './ai-context.js';
@@ -284,37 +288,10 @@ const buildCommunitiesFromMemberships = (
   const communities: CommunityNode[] = [];
 
   for (const [commId, nodeIds] of groups) {
-    // Derive a heuristic label from the most common parent directory
-    const folderCounts = new Map<string, number>();
-    for (const nodeId of nodeIds) {
-      const node = graph.getNode(nodeId);
-      if (!node?.properties.filePath) continue;
-      const normalized = node.properties.filePath.replace(/\\/g, '/');
-      const parts = normalized.split('/').filter(Boolean);
-      if (parts.length >= 2) {
-        const folder = parts[parts.length - 2];
-        if (
-          !['src', 'lib', 'core', 'utils', 'common', 'shared', 'helpers'].includes(
-            folder.toLowerCase(),
-          )
-        ) {
-          folderCounts.set(folder, (folderCounts.get(folder) || 0) + 1);
-        }
-      }
-    }
-
-    let bestFolder = '';
-    let bestCount = 0;
-    for (const [folder, count] of folderCounts) {
-      if (count > bestCount) {
-        bestCount = count;
-        bestFolder = folder;
-      }
-    }
-
-    const label = bestFolder
-      ? bestFolder.charAt(0).toUpperCase() + bestFolder.slice(1)
-      : `Cluster_${commId.replace('comm_', '')}`;
+    const label =
+      labelFromFilePaths(
+        nodeIds.map((nodeId) => graph.getNode(nodeId)?.properties.filePath || ''),
+      ) || `Cluster_${commId.replace('comm_', '')}`;
 
     // Compute cohesion as internal-edge ratio (matches backend calculateCohesion).
     // For each member node, count edges that stay inside the community vs total.

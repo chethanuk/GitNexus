@@ -87,7 +87,8 @@ describe('stable community identity', () => {
             `fn:${group}${i}`,
             `${group}${i}`,
             'Function',
-            genericLabels ? 'src/flow.ts' : `src/${group}/flow.ts`,
+            // No path, so labels fall through to name prefixes or Cluster_ ids
+            genericLabels ? '' : `src/${group}/flow.ts`,
           ),
         );
       }
@@ -737,6 +738,59 @@ module.exports = {
       expect(second.rawMemberships).toEqual(first.rawMemberships);
       expect(second.stats.modularity).toBe(first.stats.modularity);
     });
+  });
+});
+
+describe('community labels', () => {
+  // Fully connected symbols form one community; each entry is a member's filePath.
+  const labelFor = async (filePaths: string[]) => {
+    const graph = createKnowledgeGraph();
+    filePaths.forEach((filePath, i) => {
+      graph.addNode(makeNode(`fn:m${i}`, `m${i}`, 'Function', filePath));
+      for (let j = 0; j < i; j++)
+        graph.addRelationship(makeRel(`r${j}-${i}`, `fn:m${j}`, `fn:m${i}`));
+    });
+    const result = await processCommunities(graph, undefined, { engine: 'graphology' });
+    expect(result.communities).toHaveLength(1);
+    return result.communities[0].label;
+  };
+
+  it.each([
+    ['parent folder', ['src/auth/a.ts', 'src/auth/b.ts', 'src/auth/c.ts'], 'Auth'],
+    [
+      'nearest non-generic ancestor',
+      ['src/auth/utils/a.ts', 'src/auth/utils/b.ts', 'src/pay/c.ts'],
+      'Auth',
+    ],
+    [
+      'file stem when every folder is generic',
+      ['src/core/parser.ts', 'src/core/parser.ts', 'lib/x.ts'],
+      'Parser',
+    ],
+    ['file stem for root-level files', ['billing.ts', 'billing.ts', 'billing.test.ts'], 'Billing'],
+    ['folder over a more common stem', ['src/pay/a.ts', 'src/core/b.ts', 'src/core/b.ts'], 'Pay'],
+    [
+      'smaller folder on a count tie',
+      ['src/zeta/a.ts', 'src/alpha/b.ts', 'src/zeta/c.ts', 'src/alpha/d.ts'],
+      'Alpha',
+    ],
+    ['smaller stem on a count tie', ['src/zeta.ts', 'src/alpha.ts', ''], 'Alpha'],
+    ['non-index stem over index', ['src/index.ts', 'src/index.ts', 'src/server.ts'], 'Server'],
+    ['backslash-separated paths', ['src\\auth\\a.ts', 'src\\auth\\b.ts', 'src\\c.ts'], 'Auth'],
+  ])('labels by %s', async (_case, filePaths, expected) => {
+    expect(await labelFor(filePaths)).toBe(expected);
+  });
+
+  it.each([
+    ['no file paths', ['', '', '']],
+    ['only index files', ['src/index.ts', 'index.ts', 'src/core/index.ts']],
+  ])('falls back to a stable Cluster_ label with %s', async (_case, filePaths) => {
+    expect(await labelFor(filePaths)).toMatch(/^Cluster_[0-9a-f]{12}$/);
+  });
+
+  it('gives the same label when members arrive in a different order', async () => {
+    const paths = ['src/zeta.ts', 'src/alpha.ts', 'src/zeta/x.ts', 'src/alpha/y.ts'];
+    expect(await labelFor([...paths].reverse())).toBe(await labelFor(paths));
   });
 });
 
