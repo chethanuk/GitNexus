@@ -100,7 +100,7 @@ const getStatusDisplay = (status: ToolCallInfo['status']) => {
  */
 const getToolDisplayName = (name: string, t: TFunction): string => {
   const names: Record<string, string> = {
-    // Current 7-tool architecture
+    // Current 8-tool architecture
     search: t('graph:toolCall.tools.search'),
     cypher: t('graph:toolCall.tools.cypher'),
     grep: t('graph:toolCall.tools.grep'),
@@ -108,8 +108,36 @@ const getToolDisplayName = (name: string, t: TFunction): string => {
     overview: t('graph:toolCall.tools.overview'),
     explore: t('graph:toolCall.tools.explore'),
     impact: t('graph:toolCall.tools.impact'),
+    suggest: t('graph:toolCall.tools.suggest'),
   };
   return names[name] || name;
+};
+
+/**
+ * Color the +/- lines of a suggest diff. Shown in full: the tool caps its own
+ * output, so the generic 3000-char cut would only drop the end of the hunk.
+ */
+const renderDiff = (diff: string) => {
+  // Lines before the first @@ are headers; after it, +/- are content even if they look like ---/+++.
+  let inHunk = false;
+  return diff.split('\n').map((line, i) => {
+    if (line.startsWith('@@')) inHunk = true;
+    const color = line.startsWith('@@')
+      ? 'text-sky-400'
+      : !inHunk
+        ? undefined
+        : line.startsWith('+')
+          ? 'text-emerald-400'
+          : line.startsWith('-')
+            ? 'text-rose-400'
+            : undefined;
+    return (
+      <span key={i} className={color}>
+        {line}
+        {'\n'}
+      </span>
+    );
+  });
 };
 
 export const ToolCallCard = ({ toolCall, defaultExpanded = false }: ToolCallCardProps) => {
@@ -175,9 +203,11 @@ export const ToolCallCard = ({ toolCall, defaultExpanded = false }: ToolCallCard
               </div>
               <div className="max-h-[400px] overflow-y-auto rounded bg-surface/50">
                 <pre className="p-2 font-mono text-xs whitespace-pre-wrap text-text-secondary">
-                  {toolCall.result.length > 3000
-                    ? toolCall.result.slice(0, 3000) + '\n\n' + t('common:progress.truncated')
-                    : toolCall.result}
+                  {toolCall.name === 'suggest'
+                    ? renderDiff(toolCall.result)
+                    : toolCall.result.length > 3000
+                      ? toolCall.result.slice(0, 3000) + '\n\n' + t('common:progress.truncated')
+                      : toolCall.result}
                 </pre>
               </div>
             </div>

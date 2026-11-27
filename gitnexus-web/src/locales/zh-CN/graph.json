@@ -20,7 +20,8 @@
       "read": "📄 读取文件",
       "overview": "🗺️ 代码库概览",
       "explore": "🔬 深入分析",
-      "impact": "💥 影响分析"
+      "impact": "💥 影响分析",
+      "suggest": "📝 建议修改"
     },
     "query": "查询",
     "input": "输入",

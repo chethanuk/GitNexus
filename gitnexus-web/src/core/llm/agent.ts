@@ -106,6 +106,7 @@ Before EVERY tool call, briefly state what you are doing and why. Keep narration
 - **\`explore\`** — Deep dive on a symbol, cluster, or process.
 - **\`overview\`** — Codebase map showing all clusters and processes.
 - **\`impact\`** — Impact analysis. Shows affected processes, clusters, and risk level.
+- **\`suggest\`** — Propose an edit for a line range as a diff hunk. Read-only, never writes files.
 
 **Tool strategy:**
 - Discovery → \`search\` or \`overview\`
