@@ -18,6 +18,11 @@ import { formatAnalyzeFtsSkipSummary } from '../core/search/fts-policy.js';
 import { isLbugReady, LbugWipeError } from '../core/lbug/lbug-adapter.js';
 import { findUndeclaredRelationPairError } from '../core/lbug/rel-pair-routing.js';
 import { causeChain } from '../lib/utils.js';
+import { loadMeta } from '../storage/repo-meta.js';
+import { isGitNexusManagedPath } from '../storage/gitnexus-managed-paths.js';
+import { isIndexedDocumentationPath } from '../core/ingestion/utils/documentation-path.js';
+import { isIndexedSourceFile } from '../core/ingestion/languages/query-providers.js';
+import { classifySpringConfigFile } from '../core/ingestion/pipeline-phases/spring-config.js';
 import {
   getOsPageSize,
   isLbugCheckpointIoError,
@@ -1053,6 +1058,35 @@ export const shouldGenerateCommunitySkillFiles = (
   options: Pick<AnalyzeOptions, 'skills' | 'indexOnly'> | undefined,
   pipelineResult: unknown,
 ): boolean => Boolean(options?.skills && pipelineResult && !options?.indexOnly);
+
+/**
+ * One summary line naming the commonest extensions among indexed files that
+ * no language parser handles. Those files still become File nodes, so without
+ * this a repo can look fully covered while a whole language yields no symbols.
+ */
+const formatUnparsedFilesNote = (filePaths: readonly string[]): string | undefined => {
+  const counts = new Map<string, number>();
+  for (const filePath of filePaths) {
+    // Spring application config files yield Property nodes from their own phase,
+    // and GitNexus's own output (.claude, .cursor, ...) is not the user's code.
+    if (
+      isGitNexusManagedPath(filePath) ||
+      isIndexedSourceFile(filePath) ||
+      isIndexedDocumentationPath(filePath) ||
+      classifySpringConfigFile(filePath)
+    )
+      continue;
+    const key = path.extname(filePath).toLowerCase() || path.basename(filePath);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  if (counts.size === 0) return undefined;
+  const ranked = [...counts].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+  const fileCount = (entries: typeof ranked) => entries.reduce((sum, [, count]) => sum + count, 0);
+  const total = fileCount(ranked);
+  const shown = ranked.slice(0, 5).map(([key, count]) => `${key} (${count})`);
+  if (ranked.length > 5) shown.push(`+${fileCount(ranked.slice(5))} more file(s)`);
+  return `Note: ${total} file(s) have no language parser: ${shown.join(', ')}`;
+};
 
 export const analyzeCommand = async (
   inputPath?: string,
@@ -2107,6 +2141,17 @@ const analyzeCommandImpl = async (
       `  ${(s.nodes ?? 0).toLocaleString()} nodes | ${(s.edges ?? 0).toLocaleString()} edges | ${s.communities ?? 0} clusters | ${s.processes ?? 0} flows`,
     );
     console.log(`  ${repoPath}`);
+
+    // meta.json fileHashes is keyed by the graph's File nodes. Best-effort:
+    // a missing or unreadable meta file only drops this note.
+    // shortcut: a pinned --branch sub-index keeps its meta outside storagePath,
+    // so it gets no note; resolve the branch slot here if that case matters.
+    const fileHashes =
+      result.isPrimaryBranch !== false
+        ? (await loadMeta(result.storagePath).catch(() => null))?.fileHashes
+        : undefined;
+    const unparsedNote = fileHashes && formatUnparsedFilesNote(Object.keys(fileHashes));
+    if (unparsedNote) console.log(`\n  ${unparsedNote}`);
 
     // Persistent (non-scrolling) warning when FTS indexing was skipped — the
     // progress-bar log() that fired mid-run has already scrolled away, so the
