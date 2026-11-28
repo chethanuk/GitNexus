@@ -63,6 +63,7 @@ class Cases {
 - [Scope resolver](../../gitnexus/src/core/ingestion/languages/java/scope-resolver.ts).
 - [Receiver alias fixture](../../gitnexus/test/fixtures/compiler-conformance/java-receiver-alias/).
 - [Local class naming fixture](../../gitnexus/test/fixtures/lang-resolution/java-local-class-naming/).
+- [Enum constant access fixture](../../gitnexus/test/fixtures/lang-resolution/java-constant-enum-access/): each enum constant is a `Property` of its enum, so `Enum.CONST` and `Enum.CONST.method()` emit a read `ACCESSES` edge.
 - [Java compiler and graph checks](../../gitnexus/tools/compiler-conformance/README.md).
 
 Evidence details: [receiver baseline notes](../../gitnexus/bench/receiver-resolution/BASELINE.md) and

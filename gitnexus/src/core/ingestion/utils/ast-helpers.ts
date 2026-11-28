@@ -1002,6 +1002,14 @@ export const findEnclosingClassInfo = (
   resolveDetachedOwnerName?: LanguageProvider['resolveDetachedOwnerName'],
 ): EnclosingClassInfo | null => {
   let current = node.parent;
+  // Java: an enum constant's own name is a field of the enum, so skip the
+  // constant node even when its body synthesizes an `E$N` class below.
+  if (
+    current?.type === 'enum_constant' &&
+    current.childForFieldName?.('name')?.startIndex === node.startIndex
+  ) {
+    current = current.parent;
+  }
   let iterations = 0;
   // Tracks container nodes already visited via the hook so a misbehaving hook
   // that keeps redirecting back to the same container cannot loop forever.

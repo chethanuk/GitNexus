@@ -1626,6 +1626,9 @@ export const JAVA_QUERIES = `
   declarator: (variable_declarator
     name: (identifier) @name)) @definition.property
 
+; Enum constants are implicit static final fields of the enum
+(enum_constant name: (identifier) @name @definition.property)
+
 ; Imports - capture any import declaration child as source
 (import_declaration (_) @import.source) @import
 
