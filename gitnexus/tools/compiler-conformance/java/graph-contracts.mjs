@@ -597,6 +597,51 @@ async function verifyWriteAccessTrackingJava() {
     assert.equal(addressWrite.source, 'updateUser');
   }
 }
+async function verifyJavaConstantAndEnumConstantAccess() {
+  let result;
+  result = await runPipelineFromRepo(path.join(FIXTURES, 'java-constant-enum-access'), () => {});
+  const ids = (edges) => edges.map((e) => e.rel.targetId).sort(compareCodeUnits);
+  const fromCaller = (type) =>
+    getRelationships(result, type).filter((e) => e.source === 'testCallGraph2');
+  // static, instance and enum-constant reads (bodied constant included) are
+  // one read each; the unread DEP_TYPCD_102 gets none
+  const reads = fromCaller('ACCESSES');
+  assert.ok(reads.every((e) => e.rel.reason === 'read'));
+  assert.deepEqual(ids(reads), [
+    'Property:TestConstants.java:TestConstants.TEST',
+    'Property:TestConstants.java:TestConstants.TEST_2',
+    'Property:TestConstants.java:TestConstants.TEST_3',
+    'Property:ViewCommEnum.java:ViewCommEnum.DEP_TYPCD_101',
+    'Property:ViewCommEnum.java:ViewCommEnum.DEP_TYPCD_103',
+  ]);
+  // getName() goes through the constant's enum type, not the same-named
+  // TestConstants.getName()
+  assert.deepEqual(ids(fromCaller('CALLS').filter((e) => e.target === 'getName')), [
+    'Method:ViewCommEnum.java:ViewCommEnum.getName#0',
+  ]);
+  // every constant is a property of the enum; the bodied one's method stays
+  // on its synthesized ViewCommEnum$1 class
+  assert.deepEqual(
+    ids(
+      getRelationships(result, 'HAS_PROPERTY').filter(
+        (e) => e.rel.sourceId === 'Enum:ViewCommEnum.java:ViewCommEnum',
+      ),
+    ),
+    [
+      'Property:ViewCommEnum.java:ViewCommEnum.DEP_TYPCD_101',
+      'Property:ViewCommEnum.java:ViewCommEnum.DEP_TYPCD_102',
+      'Property:ViewCommEnum.java:ViewCommEnum.DEP_TYPCD_103',
+      'Property:ViewCommEnum.java:ViewCommEnum.code',
+      'Property:ViewCommEnum.java:ViewCommEnum.name',
+    ],
+  );
+  assert.deepEqual(
+    getRelationships(result, 'HAS_METHOD')
+      .filter((e) => e.target === 'hook')
+      .map((e) => e.rel.sourceId),
+    ['Class:ViewCommEnum.java:ViewCommEnum$1'],
+  );
+}
 async function verifyJavaImportOfATypeDeclaredUnderSeveral() {
   let result;
   result = await runPipelineFromRepo(
@@ -1318,6 +1363,7 @@ export async function checkGraphContracts() {
   await verifyDeepFieldChainResolutionJava();
   await verifyMixedFieldCallChainResolutionJava();
   await verifyWriteAccessTrackingJava();
+  await verifyJavaConstantAndEnumConstantAccess();
   await verifyJavaImportOfATypeDeclaredUnderSeveral();
   await verifyJavaOverloadDisambiguationByParameterTypes();
   await verifyJavaSameArityOverloadCrossFileAndChain();

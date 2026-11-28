@@ -106,6 +106,10 @@ const JAVA_SCOPE_QUERY = `
   declarator: (variable_declarator
     name: (identifier) @declaration.name)) @declaration.variable
 
+;; Declarations — enum constants (implicit static final fields of the enum)
+(enum_constant
+  name: (identifier) @declaration.name) @declaration.variable
+
 ;; Declarations — local variables
 (local_variable_declaration
   declarator: (variable_declarator
